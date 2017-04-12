@@ -13,8 +13,8 @@ import org.glassfish.jersey.server.ResourceConfig;
  *
  */
 public class Router {
-
-	public static final String BASE_URI = "http://0.0.0.0:8090/conversationproxy/";
+    // Base URI the Grizzly HTTP server will listen on
+    public static final String BASE_URI = "http://0.0.0.0:8080/conversationproxy/";
     
     private final static Logger logger = Logger.getLogger(Router.class);
 
