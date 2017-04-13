@@ -1,6 +1,7 @@
 package com.servion.watson.router;
 
 import java.io.IOException;
+
 import java.net.URI;
 
 import org.apache.log4j.Logger;
@@ -8,13 +9,13 @@ import org.glassfish.grizzly.http.server.HttpServer;
 import org.glassfish.jersey.grizzly2.httpserver.GrizzlyHttpServerFactory;
 import org.glassfish.jersey.server.ResourceConfig;
 
+import static com.servion.watson.router.ApplicationConstants.BASE_URI;
+
 /**
  * Main class.
  *
  */
 public class Router {
-    // Base URI the Grizzly HTTP server will listen on
-    public static final String BASE_URI = "http://0.0.0.0:8080/conversationproxy/";
     
     private final static Logger logger = Logger.getLogger(Router.class);
 

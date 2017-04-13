@@ -1,8 +1,7 @@
 package com.servion.watson.router;
 
-import static com.servion.watson.router.ApplicationConstants.*;
-
 import java.io.IOException;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -43,6 +42,8 @@ import com.ibm.watson.developer_cloud.conversation.v1.model.MessageResponse;
 import com.ibm.watson.developer_cloud.http.ServiceCall;
 import com.ibm.watson.developer_cloud.util.GsonSingleton;
 
+import static com.servion.watson.router.ApplicationConstants.*;
+
 /**
  * @author larsen.mallick
  *
@@ -53,20 +54,10 @@ import com.ibm.watson.developer_cloud.util.GsonSingleton;
  *         Orchestrator and Covnersation service. Complies Proxy pattern.
  * 
  */
-@Path("api")
-public class RouteResource {
+@Path("soe")
+public class SOEService {
 
-	private final static Logger logger = Logger.getLogger(RouteResource.class);
-
-	private final static String NO = "No";
-
-	private final static String YES = "Yes";
-
-	/**
-	 * Constant representing input field in request object
-	 * 
-	 */
-	private final static String FIELD_INPUT = "input";
+	private final static Logger logger = Logger.getLogger(SOEService.class);
 
 	/*
 	 * sessionID is used to maintain session on the business application side.
@@ -145,19 +136,6 @@ public class RouteResource {
 		boolean businessHitRequested = false;
 
 		/*
-		 * Indicates if agent transfer is requested by caller. Upon receiving
-		 * agentTransferRequested = true, router service will post attach data
-		 * to agent through web service.
-		 */
-		boolean transferRequested = false;
-
-		/*
-		 * Informs the voice gateway to initiate a transfer after the included
-		 * text response is played back to the caller. *
-		 */
-		String vgwTransfer = NO;
-
-		/*
 		 * Indicates the API call to be executed in the business application
 		 */
 		String actionRequested = null;
@@ -194,12 +172,12 @@ public class RouteResource {
 
 			JsonObject requestBodyJson = GsonSingleton.getGson().fromJson(postBody.toStringContent(), JsonElement.class)
 					.getAsJsonObject();
-			input = requestBodyJson.getAsJsonObject(FIELD_INPUT).get("text").getAsString();
+			input = requestBodyJson.getAsJsonObject(FIELD_INPUT).get(FIELD_TEXT).getAsString();
 			if (logger.isDebugEnabled())
 				logger.debug("Input received from VG => " + input);
 
-			if (requestBodyJson.getAsJsonObject("context") != null) {
-				String contextAsString = requestBodyJson.getAsJsonObject("context").toString();
+			if (requestBodyJson.getAsJsonObject(FIELD_CONTEXT) != null) {
+				String contextAsString = requestBodyJson.getAsJsonObject(FIELD_CONTEXT).toString();
 				context = GsonSingleton.getGson().fromJson(contextAsString, new TypeToken<HashMap<String, Object>>() {
 				}.getType());
 				if (logger.isDebugEnabled())
@@ -207,277 +185,213 @@ public class RouteResource {
 			}
 
 			/*
-			 * 1. Check if input is DTMF 2. For a DTMF Input, do not hit
-			 * conversation service till term char is reached 3. Upon receiving
-			 * term char, continue with the rest of the flow
+			 * 
+			 * (vgwAllowDTMF) is set true by conversation service only where
+			 * application needs DTMF input.
+			 * 
+			 * ---------------------------------------------------- Check the
+			 * expected input-type (DTMF or Speech) a. Checks if that’s a DTMF
+			 * Input (Single Digit Input) i. Construct mock response for Single
+			 * Digit DTMF Input ii. Concatenate the dtmf input and store on
+			 * context b. If the input is ‘#’ i. Create a proxy request and hit
+			 * conversation service c. If the transcription from STT service is
+			 * not a single digit, return an error message requesting DTMF Input
+			 * only If the expected input is not DTMF and SOE receives speech
+			 * inputs i. Create a proxy request and hit conversation service
+			 * ----------------------------------------------------
+			 * 
 			 */
-			if (isDigit(input) && verifyProperty(context, "vgwAllowDTMF", YES)) {
+			if (verifyProperty(context, VGW_ALLOW_DTMF, YES)) {
 
-				conversationResponseMsg = mockResponseForDTMF(input, context);
+				if (isDigit(input)) {
 
-			} else {
+					if (isTermChar(input)) {
 
-				if (!isTermChar(input) && verifyProperty(context, "vgwAllowDTMF", YES)) {
+						input = (String) context.get("dtmfInput");
+						logger.debug("Assigning input from dtmfInput in context " + input);
 
-					conversationResponseMsg = expectingDTMFInput(context);
+						/*
+						 * Indicates termination of DTMF input. Remove
+						 * vgwAllowDTMF & dtmfInput from context.
+						 */
+						context.remove(VGW_ALLOW_DTMF);
+						context.remove("dtmfInput");
+					} else {
+						conversationResponseMsg = mockResponseForDTMF(input, context);
+					}
 
 				} else {
-
-					if (isTermChar(input) && verifyProperty(context, "vgwAllowDTMF", YES)) {
-						context.remove("vgwAllowDTMF");
-						/*
-						 * if dtmf input is terminated by #, get dtmfInput from
-						 * context and assign in input. else, it's assumed that the
-						 * input is speech.
-						 */
-						if (context != null && context.containsKey("dtmfInput")) {
-							if (logger.isDebugEnabled())
-								logger.debug("Context object contains dtmfInput.");
-							input = (String) context.get("dtmfInput");
-							if (logger.isDebugEnabled())
-								logger.debug("Assigning input from dtmfInput in context " + input);
-							context.remove("dtmfInput");
-							if (logger.isDebugEnabled())
-								logger.debug("Removed dtmfInput from context " + context);
-						}
-					}
-
-
-					/*
-					 * 1. Construct a request message based on the input and
-					 * context using builder pattern since context is optional
-					 * 2. Update serviceCall task with the proxy request message
-					 * 3. Execute the service and get back response (synchronous
-					 * call) 4. This supports - Synchronous, Asynchronous and
-					 * Reactive Calls through a CompletableFuture. 5. Update the
-					 * context object
-					 */
-
-					proxyRequestMsg = new MessageRequest.Builder().inputText(input).context(context).build();
-					if (logger.isDebugEnabled())
-						logger.debug("ConversationService::Proxy_Request " + proxyRequestMsg);
-					serviceCall = service.message(workspaceid, proxyRequestMsg);
-
-					conversationResponseMsg = serviceCall.execute();
-					if (logger.isDebugEnabled())
-						logger.debug("ConversationService::Conversation_Response " + conversationResponseMsg);
-
-					context = conversationResponseMsg.getContext();
-					if (logger.isDebugEnabled())
-						logger.debug("ConversationService::Conversation_Context " + context);
-
-					/*
-					 * businessHitRequested will be included included in context
-					 * by conversation If true, business application hit will be
-					 * performed After business application hit, this parameter
-					 * will need to reset in context
-					 */
-					businessHitRequested = (context.get("businessHitRequested") != null)
-							? (Boolean) context.get("businessHitRequested") : false;
-					if (logger.isDebugEnabled())
-						logger.debug("ConversationService::Conversation_businessHitRequested " + businessHitRequested);
-
-					/*
-					 * agentTransferRequested will be included included in
-					 * context by conversation If true, router will pass data to
-					 * agent application through web service. After web service
-					 * call, this parameter will need to reset in context
-					 */
-					transferRequested = (context.get("transferRequested") != null)
-							? (Boolean) context.get("transferRequested") : false;
-					if (logger.isDebugEnabled())
-						logger.debug("ConversationService::Conversation_transferRequested " + transferRequested);
-
-					while (businessHitRequested || transferRequested) {
-
-						/*
-						 * Look for session id in the context object. Session ID
-						 * will be used to stick session with the conversation
-						 * service session ID will not be available if no
-						 * business application hit is performed till the point
-						 * in the current conversation
-						 */
-						sessionID = (context.get("sessionID") != null) ? (String) context.get("sessionID") : null;
-						if (logger.isDebugEnabled())
-							logger.debug("ConversationService::Conversation_sessionID " + sessionID);
-
-						/*
-						 * Conversation service will define the action to be
-						 * performed based on the caller intent Get the action
-						 * requested from context object After performing the
-						 * action, action requested will be either set to an
-						 * empty string
-						 */
-						actionRequested = (context.get("actionRequested") != null)
-								? (String) context.get("actionRequested") : null;
-						if (logger.isDebugEnabled())
-							logger.debug("ConversationService::Conversation_actionRequested " + actionRequested);
-
-						/*
-						 * Business application URL will be invoked and requried
-						 * data will be updated in context while the method
-						 * returns either success of failure This method will
-						 * throw IllegalStateException if the requried request
-						 * parameter is not passed by conversation service.
-						 */
-						if (businessHitRequested) {
-							if (logger.isDebugEnabled())
-								logger.debug("Calling getBusinessData.");
-							dataFetchResult = getBusinessData(actionRequested, context);
-						}
-						if (transferRequested) {
-							if (logger.isDebugEnabled())
-								logger.debug("Detected Transfer Requested.");
-							dataFetchResult = "success";
-						}
-
-						/*
-						 * After business application hit, this parameter will
-						 * need to reset in context
-						 */
-						if (logger.isDebugEnabled())
-							logger.debug("Update Context::actionRequested = null");
-						context.put("actionRequested", null);
-
-						/*
-						 * After business application hit, session ID will be
-						 * maintained in conversation context to manage cookies
-						 */
-						if (logger.isDebugEnabled())
-							logger.debug("Update Context::sessionID = " + sessionID);
-						context.put("sessionID", sessionID);
-
-						/*
-						 * After business application hit, this parameter will
-						 * need to reset in context
-						 */
-						if (logger.isDebugEnabled())
-							logger.debug("Update Context::informationRequested = null");
-						context.put("informationRequested", null);
-
-						/*
-						 * After business application hit, this parameter will
-						 * need to reset in context
-						 */
-						if (businessHitRequested) {
-							if (logger.isDebugEnabled())
-								logger.debug("Update Context::toggling businessHitRequested");
-							context.put("businessHitRequested", !businessHitRequested);
-						}
-						/*
-						 * After agent data transfer application hit, this
-						 * parameter will need to reset in context
-						 */
-						if (transferRequested) {
-							if (logger.isDebugEnabled())
-								logger.debug("Update Context::toggling transferRequested");
-							context.put("transferRequested", !transferRequested);
-						}
-
-						/*
-						 * Intent will be updated and sent to conversation
-						 * service to drive the dialog. Possible values are:
-						 * identify_success/identify_failure
-						 * getProfile_success/getProfile_failure
-						 * acctStatus_success/acctStatus_failure This will be
-						 * computed as a concatenation of
-						 * actionRequested+Success/Failure.
-						 */
-						intent = actionRequested + "_" + dataFetchResult;
-						if (logger.isDebugEnabled())
-							logger.debug("Update intent => " + intent);
-
-						/*
-						 * 1. Construct a new request with the above intent 2.
-						 * Use the updated context object 3. Set confidence
-						 * manually to 100% (1.0) 4. Execute service call 5. Get
-						 * result from service call 6. update the context map
-						 */
-						proxyRequestMsg = new MessageRequest.Builder().intent(new Intent(intent, 1.0)).context(context)
-								.build();
-						if (logger.isDebugEnabled())
-							logger.debug("ConversationService::Proxy_Request " + proxyRequestMsg);
-
-						serviceCall = service.message(workspaceid, proxyRequestMsg);
-
-						conversationResponseMsg = serviceCall.execute();
-						if (logger.isDebugEnabled())
-							logger.debug("ConversationService::Conversation_Response " + conversationResponseMsg);
-
-						context = conversationResponseMsg.getContext();
-						if (logger.isDebugEnabled())
-							logger.debug("ConversationService::Conversation_Context " + context);
-
-						/*
-						 * businessHitRequested will be included included in
-						 * context by conversation If true, business application
-						 * hit will be performed again After business
-						 * application hit, this parameter will need to reset in
-						 * context
-						 */
-						businessHitRequested = context.containsKey("businessHitRequested")
-								? (Boolean) context.get("businessHitRequested") : false;
-						if (logger.isDebugEnabled())
-							logger.debug(
-									"ConversationService::Conversation_businessHitRequested " + businessHitRequested);
-
-						/*
-						 * transferRequested will be included included in
-						 * context by conversation This ideally will have to be
-						 * false by now, since transferRequested can be true
-						 * only on one occasion
-						 */
-						transferRequested = context.containsKey("transferRequested")
-								? (Boolean) context.get("transferRequested") : false;
-						if (logger.isDebugEnabled())
-							logger.debug("ConversationService::Conversation_transferRequested " + transferRequested);
-
-						/*
-						 * Conversation will set this to 'yes' after receiving
-						 * tranferToAgent_success intent and playing
-						 * pre-transfer message
-						 */
-						vgwTransfer = context.containsKey("vgwTransfer") ? (String) context.get("vgwTransfer") : NO;
-						if (logger.isDebugEnabled())
-							logger.debug("ConversationService::Conversation_vgwTransfer " + vgwTransfer);
-
-						/*
-						 * Transfer destination is hard-coded for POC. This must
-						 * in-turn come from business application
-						 */
-						if (YES.equals(vgwTransfer)) {
-							context.put("vgwTransferTarget", "sip:8002@ped.servion.com");
-							if (logger.isDebugEnabled())
-								logger.debug("ConversationService::Conversation_vgwTransferTarget "
-										+ context.get("vgwTransferTarget"));
-						}
-
-					}
+					conversationResponseMsg = expectingDTMFInput(context);
 				}
 
 			}
 
-		} catch (EmptyBodyException exception) {
+			while (conversationResponseMsg == null) {
 
-			/*
-			 * This exception is thrown when post body is empty.
-			 */
-			logger.error("Request from Voice Gateway is empty!", exception);
+				if (input != null)
+					proxyRequestMsg = new MessageRequest.Builder().inputText(input).context(context).build();
+				else
+					proxyRequestMsg = new MessageRequest.Builder().intent(new Intent(intent, 1.0)).context(context)
+							.build();
+				if (logger.isDebugEnabled())
+					logger.debug("ConversationService::Proxy_Request " + proxyRequestMsg);
 
-			/*
-			 * upon getting this exception, return null to SIP Orchestrator
-			 * since there is no context, fallback is not possible.
-			 */
-			conversationResponseMsg = updateTextForEmptyResponse(new MessageResponse());
+				serviceCall = service.message(workspaceid, proxyRequestMsg);
+
+				conversationResponseMsg = serviceCall.execute();
+				if (logger.isDebugEnabled())
+					logger.debug("ConversationService::Conversation_Response " + conversationResponseMsg);
+
+				context = conversationResponseMsg.getContext();
+				if (logger.isDebugEnabled())
+					logger.debug("ConversationService::Conversation_Context " + context);
+
+				/*
+				 * businessHitRequested will be included included in context by
+				 * conversation If true, business application hit will be
+				 * performed After business application hit, this parameter will
+				 * need to reset in context
+				 */
+				businessHitRequested = (context.containsKey("businessHitRequested"))
+						? (Boolean) context.get("businessHitRequested") : false;
+				if (logger.isDebugEnabled())
+					logger.debug("ConversationService::Conversation_businessHitRequested " + businessHitRequested);
+
+				if (businessHitRequested) {
+
+					/*
+					 * Look for session id in the context object. Session ID
+					 * will be used to stick session with the conversation
+					 * service session ID will not be available if no business
+					 * application hit is performed till the point in the
+					 * current conversation
+					 */
+					sessionID = (context.containsKey(HTTP_SESSION_ID)) ? (String) context.get(HTTP_SESSION_ID) : null;
+					if (logger.isDebugEnabled())
+						logger.debug("ConversationService::Conversation_sessionID " + sessionID);
+
+					/*
+					 * Conversation service will define the action to be
+					 * performed based on the caller intent Get the action
+					 * requested from context object After performing the
+					 * action, action requested will be either set to an empty
+					 * string
+					 */
+					actionRequested = (context.get("actionRequested") != null) ? (String) context.get("actionRequested")
+							: null;
+					if (logger.isDebugEnabled())
+						logger.debug("ConversationService::Conversation_actionRequested " + actionRequested);
+
+					/*
+					 * Business application URL will be invoked and requried
+					 * data will be updated in context while the method returns
+					 * either success of failure This method will throw
+					 * IllegalStateException if the requried request parameter
+					 * is not passed by conversation service.
+					 */
+					if (logger.isDebugEnabled())
+						logger.debug("Calling getBusinessData.");
+					if(actionRequested.equals("transferToAgent"))
+						dataFetchResult = "success";
+					else
+						dataFetchResult = getBusinessData(actionRequested, context);
+
+					/*
+					 * After business application hit, this parameter will need
+					 * to reset in context
+					 */
+					if (logger.isDebugEnabled())
+						logger.debug("Update Context::actionRequested removed");
+					context.remove("actionRequested");
+
+					/*
+					 * After business application hit, session ID will be
+					 * maintained in conversation context to manage cookies
+					 */
+					if (logger.isDebugEnabled())
+						logger.debug("Update Context::sessionID = " + sessionID);
+					context.put(HTTP_SESSION_ID, sessionID);
+
+					/*
+					 * After business application hit, this parameter will need
+					 * to reset in context
+					 */
+					if (logger.isDebugEnabled())
+						logger.debug("Update Context::informationRequested removed");
+					context.remove("informationRequested");
+
+					/*
+					 * After business application hit, this parameter will need
+					 * to reset in context
+					 */
+					if (businessHitRequested) {
+						if (logger.isDebugEnabled())
+							logger.debug("Update Context::businessHitRequested removed");
+						context.remove("businessHitRequested");
+					}
+
+					/*
+					 * Intent will be updated and sent to conversation service
+					 * to drive the dialog. Possible values are:
+					 * identify_success/identify_failure
+					 * getProfile_success/getProfile_failure
+					 * acctStatus_success/acctStatus_failure This will be
+					 * computed as a concatenation of
+					 * actionRequested+Success/Failure.
+					 */
+					intent = actionRequested + "_" + dataFetchResult;
+					if (logger.isDebugEnabled())
+						logger.debug("Update intent => " + intent);
+
+					/*
+					 * change the input to null, since router will have to reach
+					 * conversation while returning from business application.
+					 * Input is only a transcription result from STT.
+					 */
+					input = null;
+					if (logger.isDebugEnabled())
+						logger.debug("Update input => " + input);
+
+					/*
+					 * changing conversation response to null since router will
+					 * have to reach conversation again to get the action of
+					 * business application failure or success.
+					 */
+					conversationResponseMsg = null;
+					if (logger.isDebugEnabled())
+						logger.debug("Update conversationResponseMsg => " + conversationResponseMsg);
+
+				} else {
+
+					if (verifyProperty(context, "vgwTransfer", YES)) {
+						context.put("vgwTransferTarget", "sip:8002@ped.servion.com");
+
+						if (logger.isDebugEnabled())
+							logger.debug("ConversationService::Conversation_vgwTransferTarget "
+									+ context.get("vgwTransferTarget"));
+					}
+
+				}
+
+			}
 
 		} catch (Exception exception) {
 
 			if (exception instanceof BusinessAppCommunicationException) {
+
 				/*
 				 * Indicates communication with business layer failed. Please
 				 * debug getBusinessData method & controllerCall method.
 				 */
 				logger.error("Communication with business layer failed!", exception);
+
+			} else if (exception instanceof EmptyBodyException) {
+
+				/*
+				 * This exception is thrown when post body is empty.
+				 */
+				logger.error("Request from Voice Gateway is empty!", exception);
+
 			} else {
 				/*
 				 * This is a generic catcher.
@@ -691,34 +605,11 @@ public class RouteResource {
 				new String[] { "Sorry! The requested operation failed. " + "Please call us again in sometime" });
 
 		if (response.getContext() != null)
-			response.getContext().put("vgwHangUp", YES);
+			response.getContext().put(CALL_HANG_UP, YES);
 
 		return;
 	}
 
-	/**
-	 *
-	 * This method is called to manually update the text to be played to the
-	 * caller. This method, for now, is only used when EmptyBodyException is
-	 * thrown to play a message to the caller to repeat the utterance. This is
-	 * not a handling for no-input.
-	 *
-	 * @param response
-	 * @return
-	 */
-	private MessageResponse updateTextForEmptyResponse(MessageResponse response) {
-		/*
-		 * In some rare chances, conversation response could be null. For
-		 * example: if communication with conversation service is interrupted.
-		 *
-		 */
-		Map<String, Object> outputs = new HashMap<>();
-		response.setOutput(outputs);
-		updateTextInResponse(response, "text",
-				new String[] { "Sorry! I could not understand that. " + "Is there something else I can find for you" });
-		return response;
-	}
-	
 	/**
 	 * Returns a mock response when a speech input is received while expecting a
 	 * Touch-tone input.
@@ -801,32 +692,19 @@ public class RouteResource {
 		if (logger.isDebugEnabled())
 			logger.debug("Entering addCommonVGParams() response - " + response);
 
-		if (response != null && response.getContext() != null
-				&& (!response.getContext().containsKey("vgwHangUp") || (response.getContext().containsKey("vgwHangUp")
-						&& YES.equalsIgnoreCase((String) response.getContext().get("vgwHangUp"))))) {
+		if (!verifyProperty(response.getContext(), CALL_HANG_UP, YES)) {
 
-			response.getContext().put("vgwTransferFailedMessage",
-					"Call Transfer Failed, Please try again later. Good bye.");
-			response.getContext().put("vgwConversationFailedMessage",
-					"Call Conversation Failed, Please try again later. Good bye.");
-
-			response.getContext().put("vgwPostResponseTimeoutCount", "15000");
-
-			/*
-			 * Default value for Allow Barge In is agreed to be YES But in case
-			 * conversation sends NO, this is a special indication and has to be
-			 * passed back to VG.
-			 */
-			if (!verifyProperty(response.getContext(), "vgwAllowBargeIn", NO))
-				response.getContext().put("vgwAllowBargeIn", YES);
+			response.getContext().put(ALLOW_BARGE_IN, YES);
 
 			/*
 			 * Default value for Allow DTMF is agreed to be NO But in case
 			 * conversation sends YES (Ex: PIN Collection), this is a special
 			 * indication and has to be passed back to VG.
 			 */
-			if (!verifyProperty(response.getContext(), "vgwAllowDTMF", YES))
-				response.getContext().put("vgwAllowDTMF", NO);
+			if (!verifyProperty(response.getContext(), VGW_ALLOW_DTMF, YES))
+				response.getContext().put(VGW_ALLOW_DTMF, NO);
+
+			response.getContext().put(POST_RESPONSE_TIMEOUT, STANDARD_POST_RESPONSE_TIMEOUT);
 
 			/*
 			 * one time audio : A URL to an audio file that is played a single
@@ -834,45 +712,8 @@ public class RouteResource {
 			 * one-time utterances. This could be used to override
 			 * vgwMusicOnHoldURL from conversation
 			 */
-			response.getContext().put("vgwOneTimeAudioURL",
-					"https://raw.githubusercontent.com/larsen-mallick/conversation_router/master/musicOnHoldSample_cut.wav");
-
-			/*
-			 * Set custom STT Params as required. These will override the
-			 * parameters set by conversation service.
-			 */
-			JsonObject vgwSTTConfigSettings = new JsonObject();
-			JsonObject vgwSTTConfigParams = new JsonObject();
-			/* Add more STT Settings here - Start */
-			vgwSTTConfigParams.addProperty("smartFormatting", true);
-			/* Add more STT Settings here - End */
-			vgwSTTConfigSettings.add("config", vgwSTTConfigParams);
-
-			/*
-			 * Set custom TTS Params as required. These will override the
-			 * parameters set by conversation service.
-			 */
-			JsonObject vgwTTSConfigSettings = new JsonObject();
-			JsonObject vgwTTSConfigParams = new JsonObject();
-			/* Add more TTS Settings here - Start */
-			vgwTTSConfigParams.addProperty("voice", "es-ES_LauraVoice");
-			/* Add more TTS Settings here - End */
-			vgwTTSConfigSettings.add("config", vgwTTSConfigParams);
-
-			/*
-			 * Very important:
-			 * 
-			 * The below statement is commented out since this will reset the WS
-			 * Connection to Media Relay. Do this only when highly required such
-			 * as language change, profanity update, mask output etc... With the
-			 * current release of VG, this doesn't work now due to
-			 * upsamplingrate error with STT.
-			 * 
-			 * response.getContext().put("vgwSTTConfigSettings",
-			 * vgwSTTConfigSettings);
-			 * response.getContext().put("vgwTTSConfigSettings",
-			 * vgwTTSConfigSettings);
-			 */
+			response.getContext().put(POST_RESPONSE_AUDIO,
+					POST_RESPONSE_AUDIO_VALUE);
 
 		}
 	}
@@ -902,7 +743,10 @@ public class RouteResource {
 				Integer.parseInt(text);
 				isDigit = true;
 			} catch (NumberFormatException exception) {
-				isDigit = false;
+				if(text.equals("#") || text.equals("*"))
+					isDigit = true;
+				else
+					isDigit = false;
 			}
 		}
 		if (logger.isDebugEnabled())

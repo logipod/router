@@ -8,7 +8,7 @@ package com.servion.watson.router;
  * @author larsen.mallick
  *
  */
-public class EmptyBodyException extends Exception {
+public class EmptyBodyException extends RuntimeException {
 
 	/**
 	 * Auto-generated. This is JVM dependent.
