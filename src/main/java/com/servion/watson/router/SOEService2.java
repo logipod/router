@@ -283,8 +283,8 @@ public class SOEService2 {
 						 * need to reset in context
 						 */
 						if (logger.isDebugEnabled())
-							logger.debug("Update Context::actionRequested removed");
-						context.remove("actionRequested");
+							logger.debug("Update Context::actionRequested updated to null");
+						context.put("actionRequested", null);
 
 						/*
 						 * After business application hit, session ID will be
@@ -299,16 +299,16 @@ public class SOEService2 {
 						 * need to reset in context
 						 */
 						if (logger.isDebugEnabled())
-							logger.debug("Update Context::informationRequested removed");
-						context.remove("informationRequested");
+							logger.debug("Update Context::informationRequested updated to null");
+						context.put("informationRequested",null);
 
 						/*
 						 * After business application hit, this parameter will
 						 * need to reset in context
 						 */
 						if (logger.isDebugEnabled())
-							logger.debug("Update Context::businessHitRequested removed");
-						context.remove(BUSINESS_HIT_REQUESTED);
+							logger.debug("Update Context::businessHitRequested updated to false");
+						context.put(BUSINESS_HIT_REQUESTED, false);
 
 						/*
 						 * Intent will be updated and sent to conversation
@@ -460,7 +460,7 @@ public class SOEService2 {
 			if (requestParam != null && requestParam instanceof Double)
 				requestParam = Double.toString((Double) requestParam);
 			requestParameters.add((String) requestParam);
-			context.remove("requestParam");
+			context.put("requestParam",null);
 		}
 
 		/*
@@ -778,7 +778,7 @@ public class SOEService2 {
 			response.getContext().remove(POST_RESPONSE_ONE_TIME_AUDIO);
 			response.getContext().put(VGW_PAUSE_STT, YES);
 		
-		} else if (ApplicationUtils.verifyProperty(response.getContext(), BUSINESS_HIT_REQUESTED, YES)) {
+		} else if (ApplicationUtils.verifyProperty(response.getContext(), BUSINESS_HIT_REQUESTED, true)) {
 			
 			response.getContext().put(VGW_PAUSE_STT, YES);
 			response.getContext().put(POST_RESPONSE_ON_HOLD_AUDIO, POST_RESPONSE_AUDIO_VALUE_CUT);
