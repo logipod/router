@@ -5,15 +5,15 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class ApplicationConstants {
-	
+
 	// Base URI the Grizzly HTTP server will listen on
     public static final String BASE_URI = "http://0.0.0.0:8080/conversationproxy/";
-    
+
     /**
 	 * Business application hostname & port
 	 */
 	private static final String BUSINESS_APP_ROOT = "http://172.16.14.23:8090/ivr.web/rest/";
-	
+
 	public static final Map<String, String> urlsMap = new HashMap<String, String>() {
 
 		/**
@@ -38,7 +38,7 @@ public class ApplicationConstants {
 
 	/**
 	 * Constant representing input field in request object
-	 * 
+	 *
 	 */
 	public final static String FIELD_INPUT = "input";
 
@@ -89,8 +89,8 @@ public class ApplicationConstants {
 
 	public static final String CONVERSATION_SERVICE_USER_NAME = "89315619-69b1-4641-a9a3-8cb29350a8cd";
 
-	public static final String CONVERSATION_SERVICE_PASSWORD = "usktlkSLDxUT";
+	public static final String CONVERSATION_SERVICE_PASSWORD = "XXXXXXXXXXXXXXx";
 
 	public static final String HTTP_SESSION_ID = "sessionID";
-	
+
 }
