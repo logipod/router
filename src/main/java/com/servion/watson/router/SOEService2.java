@@ -763,6 +763,15 @@ public class SOEService2 {
 		if (ApplicationUtils.verifyProperty(response.getContext(), "vgwTransfer", YES)) {
 			
 			response.getContext().put("vgwTransferTarget", "sip:8002@ped.servion.com");
+			
+			if(response.getContext().containsKey("vgwSIPCallID")) {
+				String vgwSIPCallID = (String)response.getContext().get("vgwSIPCallID");
+				if (logger.isDebugEnabled())
+					logger.debug("Entering addCommonVGParams() vgwSIPCallID - " + vgwSIPCallID);
+				
+				response.getContext().put("vgwTransferHeader", "vgwSIPCallID");
+				response.getContext().put("vgwTransferHeaderVal", vgwSIPCallID);
+			}
 
 			if (logger.isDebugEnabled())
 				logger.debug("ConversationService::Conversation_vgwTransferTarget "
