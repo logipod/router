@@ -115,7 +115,7 @@ public class ApplicationConstants {
 
 	public static final String CONVERSATION_SERVICE_USER_NAME = "89315619-69b1-4641-a9a3-8cb29350a8cd";
 
-	public static final String CONVERSATION_SERVICE_PASSWORD = "usktlkSLDxUT";
+	public static final String CONVERSATION_SERVICE_PASSWORD = "xxxxx";
 
 	public static final String HTTP_SESSION_ID = "sessionID";
 
